@@ -54,10 +54,10 @@ use crate::core::{PackageId, PackageSet, SourceId, TargetKind, Workspace};
 use crate::drop_println;
 use crate::ops;
 use crate::ops::resolve::{SpecsAndResolvedFeatures, WorkspaceResolve};
-use crate::util::BuildLogger;
 use crate::util::context::{GlobalContext, WarningHandling};
 use crate::util::interning::InternedString;
 use crate::util::log_message::LogMessage;
+use crate::util::{BuildLogger, rbe};
 use crate::util::{CargoResult, StableHasher};
 
 mod compile_filter;
@@ -130,7 +130,10 @@ impl CompileOptions {
 ///
 /// This uses the [`DefaultExecutor`]. To use a custom [`Executor`], see [`compile_with_exec`].
 pub fn compile<'a>(ws: &Workspace<'a>, options: &CompileOptions) -> CargoResult<Compilation<'a>> {
-    let exec: Arc<dyn Executor> = Arc::new(DefaultExecutor);
+    let exec: Arc<dyn Executor> = match options.build_config.rbe.clone() {
+        Some(config) => Arc::new(rbe::RemoteExecutor::new(config)),
+        None => Arc::new(DefaultExecutor),
+    };
     compile_with_exec(ws, options, &exec)
 }
 

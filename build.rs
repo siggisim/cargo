@@ -6,6 +6,7 @@ use std::process::Command;
 
 fn main() {
     commit_info();
+    compile_reapi_protos();
     compress_man();
     windows_manifest();
     #[expect(
@@ -14,6 +15,31 @@ fn main() {
     )]
     let target = std::env::var("TARGET").unwrap();
     println!("cargo:rustc-env=RUST_HOST_TARGET={target}");
+}
+
+fn compile_reapi_protos() {
+    const PROTOS: &[&str] = &[
+        "proto/build/bazel/remote/execution/v2/remote_execution.proto",
+        "proto/google/bytestream/bytestream.proto",
+        "proto/google/longrunning/operations.proto",
+        "proto/google/rpc/status.proto",
+    ];
+
+    for proto in PROTOS {
+        println!("cargo:rerun-if-changed={proto}");
+    }
+
+    let protoc = protoc_bin_vendored::protoc_bin_path().unwrap();
+    #[expect(clippy::disallowed_methods, reason = "build script tool setup")]
+    unsafe {
+        std::env::set_var("PROTOC", protoc);
+    }
+
+    tonic_build::configure()
+        .build_client(true)
+        .build_server(false)
+        .compile_protos(PROTOS, &["proto"])
+        .unwrap();
 }
 
 fn compress_man() {

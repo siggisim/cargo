@@ -72,7 +72,7 @@ use regex::Regex;
 use tracing::{debug, instrument, trace};
 
 pub use self::build_config::UserIntent;
-pub use self::build_config::{BuildConfig, CompileMode, MessageFormat};
+pub use self::build_config::{BuildConfig, CompileMode, MessageFormat, RemoteBuildConfig};
 pub use self::build_context::BuildContext;
 pub use self::build_context::FileFlavor;
 pub use self::build_context::FileType;
@@ -140,11 +140,40 @@ pub trait Executor: Send + Sync + 'static {
         on_stderr_line: &mut dyn FnMut(&str) -> CargoResult<()>,
     ) -> CargoResult<()>;
 
+    fn exec_with_context(
+        &self,
+        context: Option<&ExecutorContext>,
+        cmd: &ProcessBuilder,
+        id: PackageId,
+        target: &Target,
+        mode: CompileMode,
+        on_stdout_line: &mut dyn FnMut(&str) -> CargoResult<()>,
+        on_stderr_line: &mut dyn FnMut(&str) -> CargoResult<()>,
+    ) -> CargoResult<()> {
+        let _ = context;
+        self.exec(cmd, id, target, mode, on_stdout_line, on_stderr_line)
+    }
+
     /// Queried when queuing each unit of work. If it returns true, then the
     /// unit will always be rebuilt, independent of whether it needs to be.
     fn force_rebuild(&self, _unit: &Unit) -> bool {
         false
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct ExecutorContext {
+    pub remote: Option<RemoteExecutorContext>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RemoteExecutorContext {
+    pub rustc_path: PathBuf,
+    pub package_root: PathBuf,
+    pub target_dir: PathBuf,
+    pub build_dir: PathBuf,
+    pub sysroot: PathBuf,
+    pub outputs: Vec<PathBuf>,
 }
 
 /// A `DefaultExecutor` calls rustc without doing anything else. It is Cargo's
@@ -331,6 +360,21 @@ fn rustc(
         .get_cwd()
         .unwrap_or_else(|| build_runner.bcx.gctx.cwd())
         .to_path_buf();
+    let executor_context = ExecutorContext {
+        remote: Some(RemoteExecutorContext {
+            rustc_path: build_runner.bcx.rustc().path.clone(),
+            package_root: pkg_root.clone(),
+            target_dir: build_runner
+                .bcx
+                .ws
+                .target_dir()
+                .as_path_unlocked()
+                .to_path_buf(),
+            build_dir: build_dir.clone(),
+            sysroot: build_runner.bcx.target_data.info(unit.kind).sysroot.clone(),
+            outputs: outputs.iter().map(|output| output.path.clone()).collect(),
+        }),
+    };
     let fingerprint_dir = build_runner.files().fingerprint_dir(unit);
     let script_metadatas = build_runner.find_build_script_metadatas(unit);
     let is_local = unit.is_local();
@@ -427,7 +471,8 @@ fn rustc(
         }
 
         let result = exec
-            .exec(
+            .exec_with_context(
+                Some(&executor_context),
                 &rustc,
                 package_id,
                 &target,

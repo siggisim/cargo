@@ -6,6 +6,7 @@ use anyhow::{Context as _, bail};
 use cargo_util::ProcessBuilder;
 use serde::ser;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::thread::available_parallelism;
@@ -50,6 +51,19 @@ pub struct BuildConfig {
     pub sbom: bool,
     /// Build compile time dependencies only, e.g., build scripts and proc macros
     pub compile_time_deps_only: bool,
+    /// Experimental remote execution over the Bazel REAPI.
+    pub rbe: Option<RemoteBuildConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteBuildConfig {
+    pub endpoint: String,
+    pub instance_name: String,
+    pub api_key: Option<String>,
+    pub headers: Vec<(String, String)>,
+    pub exec_properties: Vec<(String, String)>,
+    pub remote_cache: bool,
+    pub fallback_local: bool,
 }
 
 fn default_parallelism() -> CargoResult<u32> {
@@ -113,6 +127,16 @@ impl BuildConfig {
             (None, _) => false,
         };
 
+        let rbe = match (&cfg.rbe, gctx.cli_unstable().remote_reapi) {
+            (Some(rbe), true) => Some(RemoteBuildConfig::new(rbe)?),
+            (Some(_), false) => {
+                gctx.shell()
+                    .warn("ignoring 'build.rbe' config, pass `-Zremote-reapi` to enable it")?;
+                None
+            }
+            (None, _) => None,
+        };
+
         Ok(BuildConfig {
             requested_kinds,
             jobs,
@@ -130,6 +154,7 @@ impl BuildConfig {
             timing_report: false,
             sbom,
             compile_time_deps_only: false,
+            rbe,
         })
     }
 
@@ -144,6 +169,116 @@ impl BuildConfig {
             1 => Ok(self.requested_kinds[0]),
             _ => bail!("only one `--target` argument is supported"),
         }
+    }
+}
+
+impl RemoteBuildConfig {
+    fn new(cfg: &crate::util::context::CargoBuildRbeConfig) -> CargoResult<Self> {
+        let endpoint = cfg
+            .endpoint
+            .clone()
+            .context("`build.rbe.endpoint` must be set when `build.rbe` is enabled")?;
+
+        let headers = cfg
+            .headers
+            .as_ref()
+            .map(|headers| {
+                headers
+                    .as_slice()
+                    .iter()
+                    .map(|entry| {
+                        let (name, value) = entry.split_once('=').with_context(|| {
+                            format!(
+                                "invalid `build.rbe.headers` entry `{entry}`, expected `name=value`"
+                            )
+                        })?;
+                        Ok((name.to_owned(), value.to_owned()))
+                    })
+                    .collect::<CargoResult<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        let exec_properties = cfg
+            .exec_properties
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
+            .collect();
+
+        Ok(Self {
+            endpoint,
+            instance_name: cfg.instance_name.clone().unwrap_or_default(),
+            api_key: cfg.api_key.clone(),
+            headers,
+            exec_properties,
+            remote_cache: cfg.remote_cache.unwrap_or(true),
+            fallback_local: cfg.fallback_local.unwrap_or(true),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_build_config_normalizes_exec_properties() {
+        let cfg: crate::util::context::CargoBuildRbeConfig = toml::from_str(
+            r#"
+                endpoint = "http://127.0.0.1:8980"
+                headers = ["x-buildbuddy-api-key=abc123"]
+                remote-cache = false
+                fallback-local = false
+
+                [exec-properties]
+                OSFamily = "linux"
+                Arch = "amd64"
+            "#,
+        )
+        .unwrap();
+
+        let parsed = RemoteBuildConfig::new(&cfg).unwrap();
+        assert_eq!(parsed.endpoint, "http://127.0.0.1:8980");
+        assert_eq!(
+            parsed.headers,
+            vec![("x-buildbuddy-api-key".to_owned(), "abc123".to_owned())]
+        );
+        assert_eq!(
+            parsed.exec_properties,
+            vec![
+                ("Arch".to_owned(), "amd64".to_owned()),
+                ("OSFamily".to_owned(), "linux".to_owned()),
+            ]
+        );
+        assert!(!parsed.remote_cache);
+        assert!(!parsed.fallback_local);
+    }
+
+    #[test]
+    fn remote_build_config_requires_endpoint() {
+        let cfg: crate::util::context::CargoBuildRbeConfig = toml::from_str("").unwrap();
+        let err = RemoteBuildConfig::new(&cfg).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("`build.rbe.endpoint` must be set when `build.rbe` is enabled")
+        );
+    }
+
+    #[test]
+    fn remote_build_config_rejects_malformed_headers() {
+        let cfg: crate::util::context::CargoBuildRbeConfig = toml::from_str(
+            r#"
+                endpoint = "http://127.0.0.1:8980"
+                headers = ["missing-separator"]
+            "#,
+        )
+        .unwrap();
+
+        let err = RemoteBuildConfig::new(&cfg).unwrap_err();
+        assert!(err.to_string().contains("expected `name=value`"));
     }
 }
 

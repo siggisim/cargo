@@ -100,6 +100,7 @@ Each new feature described below should explain how to use it.
     * [panic-immediate-abort](#panic-immediate-abort) --- Passes `-Cpanic=immediate-abort` to the compiler.
     * [compile-time-deps](#compile-time-deps) --- Perma-unstable feature for rust-analyzer
     * [fine-grain-locking](#fine-grain-locking) --- Use fine grain locking instead of locking the entire build cache
+    * [remote-reapi](#remote-reapi) --- Enable remote execution and caching over the Bazel REAPI
     * [target-spec-json](#target-spec-json) --- Allows the use of `.json` custom target specs.
 * rustdoc
     * [rustdoc-map](#rustdoc-map) --- Provides mappings for documentation to link to external sites like [docs.rs](https://docs.rs/).
@@ -1689,6 +1690,43 @@ panic = "immediate-abort"
 Use fine grain locking instead of locking the entire build cache.
 
 Note: Fine grain locking implicitly enables [build-dir-new-layout](#build-dir-new-layout) as fine grain locking builds on that directory reoganization.
+
+## remote-reapi
+
+Enable remote execution and remote caching for rustc invocations over the
+[Bazel Remote Execution API](https://github.com/bazelbuild/remote-apis).
+
+This feature is gated by `-Zremote-reapi` and is configured with the
+`build.rbe` table in `.cargo/config.toml`.
+
+```toml
+[unstable]
+remote-reapi = true
+
+[build.rbe]
+endpoint = "https://remote.buildbuddy.io"
+instance-name = "my-org"
+remote-cache = true
+fallback-local = true
+
+[build.rbe.exec-properties]
+OSFamily = "linux"
+Arch = "amd64"
+```
+
+Supported keys:
+
+* `endpoint` --- gRPC endpoint for the remote execution service.
+* `instance-name` --- optional remote instance name.
+* `api-key` --- optional BuildBuddy-style API key sent as `x-buildbuddy-api-key`.
+* `headers` --- optional extra gRPC metadata entries in `name=value` form.
+* `exec-properties` --- optional platform properties used for execution.
+* `remote-cache` --- whether to allow remote cache lookups and writes.
+* `fallback-local` --- whether to retry failed remote executions locally.
+
+Cargo uploads a Bazel-style Merkle input tree for each rustc action, executes it
+through `Execute`, and materializes the declared rustc outputs back into the
+local target directory. Large CAS blobs are transferred via ByteStream.
 
 ## `[lints.cargo]`
 

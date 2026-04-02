@@ -175,6 +175,7 @@ curl = { workspace = true, features = ["http2"] }
 curl-sys.workspace = true
 filetime.workspace = true
 flate2.workspace = true
+futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
 git2.workspace = true
 git2-curl.workspace = true
 gix.workspace = true
@@ -196,6 +197,8 @@ opener.workspace = true
 os_info.workspace = true
 pasetors.workspace = true
 pathdiff.workspace = true
+prost = "0.13"
+prost-types = "0.13"
 rand.workspace = true
 regex.workspace = true
 rusqlite = { workspace = true, features = ["fallible_uint"] }
@@ -209,6 +212,7 @@ serde-untagged.workspace = true
 serde_ignored.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha1.workspace = true
+sha2.workspace = true
 shell-escape.workspace = true
 tar.workspace = true
 tempfile.workspace = true
@@ -218,6 +222,8 @@ toml = { workspace = true, features = ["std", "serde", "parse", "display", "pres
 toml_edit.workspace = true
 tracing = { workspace = true, features = ["attributes"] }
 tracing-subscriber.workspace = true
+tokio = { version = "1.48.0", features = ["rt-multi-thread"] }
+tonic = { version = "0.12", features = ["transport"] }
 unicase.workspace = true
 unicode-width.workspace = true
 unicode-ident.workspace = true
@@ -271,7 +277,9 @@ memfd.workspace = true
 
 [build-dependencies]
 flate2.workspace = true
+protoc-bin-vendored = "3.2.0"
 tar.workspace = true
+tonic-build = "0.12"
 
 [[bin]]
 name = "cargo"

@@ -215,6 +215,20 @@ pub struct CargoBuildConfig {
     pub sbom: Option<bool>,
     /// Unstable feature `-Zbuild-analysis`.
     pub analysis: Option<CargoBuildAnalysis>,
+    /// Unstable feature `-Zremote-reapi`.
+    pub rbe: Option<CargoBuildRbeConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct CargoBuildRbeConfig {
+    pub endpoint: Option<String>,
+    pub instance_name: Option<String>,
+    pub api_key: Option<String>,
+    pub headers: Option<StringList>,
+    pub exec_properties: Option<HashMap<String, String>>,
+    pub remote_cache: Option<bool>,
+    pub fallback_local: Option<bool>,
 }
 
 /// Metrics collection for build analysis.

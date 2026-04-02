@@ -1,0 +1,172 @@
+syntax = "proto3";
+
+package build.bazel.remote.execution.v2;
+
+import "google/longrunning/operations.proto";
+import "google/rpc/status.proto";
+
+service Execution {
+  rpc Execute(ExecuteRequest) returns (stream google.longrunning.Operation);
+}
+
+service ContentAddressableStorage {
+  rpc FindMissingBlobs(FindMissingBlobsRequest) returns (FindMissingBlobsResponse);
+  rpc BatchUpdateBlobs(BatchUpdateBlobsRequest) returns (BatchUpdateBlobsResponse);
+  rpc BatchReadBlobs(BatchReadBlobsRequest) returns (BatchReadBlobsResponse);
+}
+
+message Digest {
+  string hash = 1;
+  int64 size_bytes = 2;
+}
+
+message Action {
+  Digest command_digest = 1;
+  Digest input_root_digest = 2;
+  bool do_not_cache = 7;
+  Platform platform = 10;
+}
+
+message Command {
+  message EnvironmentVariable {
+    string name = 1;
+    string value = 2;
+  }
+
+  enum OutputDirectoryFormat {
+    TREE_ONLY = 0;
+    DIRECTORY_ONLY = 1;
+    TREE_AND_DIRECTORY = 2;
+  }
+
+  repeated string arguments = 1;
+  repeated EnvironmentVariable environment_variables = 2;
+  Platform platform = 5;
+  string working_directory = 6;
+  repeated string output_paths = 7;
+  OutputDirectoryFormat output_directory_format = 9;
+}
+
+message Platform {
+  message Property {
+    string name = 1;
+    string value = 2;
+  }
+
+  repeated Property properties = 1;
+}
+
+message Directory {
+  repeated FileNode files = 1;
+  repeated DirectoryNode directories = 2;
+  repeated SymlinkNode symlinks = 3;
+}
+
+message FileNode {
+  string name = 1;
+  Digest digest = 2;
+  bool is_executable = 4;
+}
+
+message DirectoryNode {
+  string name = 1;
+  Digest digest = 2;
+}
+
+message SymlinkNode {
+  string name = 1;
+  string target = 2;
+}
+
+message FindMissingBlobsRequest {
+  string instance_name = 1;
+  repeated Digest blob_digests = 2;
+}
+
+message FindMissingBlobsResponse {
+  repeated Digest missing_blob_digests = 2;
+}
+
+message BatchUpdateBlobsRequest {
+  message Request {
+    Digest digest = 1;
+    bytes data = 2;
+  }
+
+  string instance_name = 1;
+  repeated Request requests = 2;
+}
+
+message BatchUpdateBlobsResponse {
+  message Response {
+    Digest digest = 1;
+    google.rpc.Status status = 2;
+  }
+
+  repeated Response responses = 1;
+}
+
+message BatchReadBlobsRequest {
+  string instance_name = 1;
+  repeated Digest digests = 2;
+}
+
+message BatchReadBlobsResponse {
+  message Response {
+    Digest digest = 1;
+    bytes data = 2;
+    google.rpc.Status status = 3;
+  }
+
+  repeated Response responses = 1;
+}
+
+message OutputFile {
+  string path = 1;
+  Digest digest = 2;
+  bool is_executable = 4;
+  bytes contents = 5;
+}
+
+message OutputDirectory {
+  string path = 1;
+  Digest tree_digest = 3;
+  bool is_topologically_sorted = 4;
+  Digest root_directory_digest = 5;
+}
+
+message OutputSymlink {
+  string path = 1;
+  string target = 2;
+}
+
+message Tree {
+  Directory root = 1;
+  repeated Directory children = 2;
+}
+
+message ActionResult {
+  repeated OutputFile output_files = 2;
+  repeated OutputDirectory output_directories = 3;
+  int32 exit_code = 4;
+  bytes stdout_raw = 5;
+  Digest stdout_digest = 6;
+  bytes stderr_raw = 7;
+  Digest stderr_digest = 8;
+  repeated OutputSymlink output_symlinks = 12;
+}
+
+message ExecuteRequest {
+  string instance_name = 1;
+  bool skip_cache_lookup = 3;
+  Digest action_digest = 6;
+  bool inline_stdout = 10;
+  bool inline_stderr = 11;
+}
+
+message ExecuteResponse {
+  ActionResult result = 1;
+  bool cached_result = 2;
+  google.rpc.Status status = 3;
+  string message = 5;
+}
