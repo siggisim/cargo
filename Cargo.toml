@@ -223,7 +223,7 @@ toml_edit.workspace = true
 tracing = { workspace = true, features = ["attributes"] }
 tracing-subscriber.workspace = true
 tokio = { version = "1.48.0", features = ["rt-multi-thread"] }
-tonic = { version = "0.12", features = ["transport"] }
+tonic = { version = "0.12", features = ["transport", "tls-native-roots"] }
 unicase.workspace = true
 unicode-width.workspace = true
 unicode-ident.workspace = true

@@ -8,10 +8,11 @@ use anyhow::{Context as _, bail};
 use cargo_util::{ProcessBuilder, ProcessError, paths};
 use futures_util::stream;
 use prost::Message;
+use rand::RngExt;
 use sha2::{Digest as _, Sha256};
-use tonic::Request;
 use tonic::metadata::{MetadataKey, MetadataValue};
 use tonic::transport::Endpoint;
+use tonic::Request;
 
 use crate::core::PackageId;
 use crate::core::Target;
@@ -61,7 +62,7 @@ const AUX_ROOT: &str = ".cargo-rbe";
 const INLINE_BLOB_LIMIT: u64 = 8 * 1024 * 1024;
 const MAX_BATCH_BLOBS: usize = 128;
 const MAX_BATCH_BYTES: u64 = 16 * 1024 * 1024;
-const BYTESTREAM_CHUNK_SIZE: usize = 1024 * 1024;
+const BYTESTREAM_CHUNK_SIZE: usize = 1_000_000;
 
 #[derive(Debug)]
 pub struct RemoteExecutor {
@@ -116,7 +117,7 @@ impl RemoteExecutor {
     }
 
     async fn execute(&self, prepared: PreparedCommand) -> CargoResult<RemoteResult> {
-        let channel = Endpoint::from_shared(self.config.endpoint.clone())
+        let channel = Endpoint::new(self.config.endpoint.clone())
             .context("invalid `build.rbe.endpoint`")?
             .connect()
             .await
@@ -127,7 +128,7 @@ impl RemoteExecutor {
         let mut bs = ByteStreamClient::new(channel.clone())
             .max_decoding_message_size(usize::MAX)
             .max_encoding_message_size(usize::MAX);
-        let mut exec = ExecutionClient::new(channel)
+        let mut exec = ExecutionClient::new(channel.clone())
             .max_decoding_message_size(usize::MAX)
             .max_encoding_message_size(usize::MAX);
 
@@ -388,10 +389,12 @@ impl RemoteExecutor {
             .context("failed to upload blob via ByteStream")?
             .into_inner();
 
-        if response.committed_size != blob.digest.size_bytes {
+        let committed_size = response.committed_size;
+
+        if committed_size != blob.digest.size_bytes {
             bail!(
                 "ByteStream committed {} bytes for blob {}, expected {}",
-                response.committed_size,
+                committed_size,
                 blob.digest.hash,
                 blob.digest.size_bytes
             );
@@ -399,7 +402,6 @@ impl RemoteExecutor {
 
         Ok(())
     }
-
     async fn bytestream_download(
         &self,
         bs: &mut ByteStreamClient<tonic::transport::Channel>,
@@ -1245,30 +1247,41 @@ fn short_digest_of_path(path: &Path) -> String {
 }
 
 fn upload_resource_name(instance_name: &str, digest: &repb::Digest) -> String {
-    let upload_id = format!(
-        "cargo-{}-{}",
-        std::process::id(),
-        &digest.hash[..digest.hash.len().min(16)]
-    );
+    let upload_id = random_uuid_v4();
     if instance_name.is_empty() {
         format!(
-            "uploads/{upload_id}/blobs/{}/{}",
+            "uploads/{upload_id}/blobs/sha256/{}/{}",
             digest.hash, digest.size_bytes
         )
     } else {
         format!(
-            "{instance_name}/uploads/{upload_id}/blobs/{}/{}",
+            "{instance_name}/uploads/{upload_id}/blobs/sha256/{}/{}",
             digest.hash, digest.size_bytes
         )
     }
 }
 
+fn random_uuid_v4() -> String {
+    let mut bytes = [0u8; 16];
+    rand::rng().fill(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        u32::from_be_bytes(bytes[0..4].try_into().unwrap()),
+        u16::from_be_bytes(bytes[4..6].try_into().unwrap()),
+        u16::from_be_bytes(bytes[6..8].try_into().unwrap()),
+        u16::from_be_bytes(bytes[8..10].try_into().unwrap()),
+        u64::from_be_bytes([0, 0, bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]])
+    )
+}
+
 fn download_resource_name(instance_name: &str, digest: &repb::Digest) -> String {
     if instance_name.is_empty() {
-        format!("blobs/{}/{}", digest.hash, digest.size_bytes)
+        format!("blobs/sha256/{}/{}", digest.hash, digest.size_bytes)
     } else {
         format!(
-            "{instance_name}/blobs/{}/{}",
+            "{instance_name}/blobs/sha256/{}/{}",
             digest.hash, digest.size_bytes
         )
     }
@@ -1397,11 +1410,11 @@ mod tests {
         let digest = digest("abc123", 42);
 
         let upload = upload_resource_name("buildbuddy", &digest);
-        assert!(upload.starts_with("buildbuddy/uploads/cargo-"));
-        assert!(upload.ends_with("/blobs/abc123/42"));
+        assert!(upload.starts_with("buildbuddy/uploads/"));
+        assert!(upload.ends_with("/blobs/sha256/abc123/42"));
 
         let download = download_resource_name("buildbuddy", &digest);
-        assert_eq!(download, "buildbuddy/blobs/abc123/42");
+        assert_eq!(download, "buildbuddy/blobs/sha256/abc123/42");
     }
 
     #[test]

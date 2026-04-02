@@ -5,6 +5,7 @@ package google.bytestream;
 service ByteStream {
   rpc Read(ReadRequest) returns (stream ReadResponse);
   rpc Write(stream WriteRequest) returns (WriteResponse);
+  rpc QueryWriteStatus(QueryWriteStatusRequest) returns (QueryWriteStatusResponse);
 }
 
 message ReadRequest {
@@ -20,10 +21,19 @@ message ReadResponse {
 message WriteRequest {
   string resource_name = 1;
   int64 write_offset = 2;
-  bytes data = 3;
-  bool finish_write = 4;
+  bool finish_write = 3;
+  bytes data = 10;
 }
 
 message WriteResponse {
   int64 committed_size = 1;
+}
+
+message QueryWriteStatusRequest {
+  string resource_name = 1;
+}
+
+message QueryWriteStatusResponse {
+  int64 committed_size = 1;
+  bool complete = 2;
 }
